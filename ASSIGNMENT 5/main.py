@@ -1,20 +1,25 @@
 from fastapi import FastAPI, Query, Response, status
 from pydantic import BaseModel, Field
+
 app = FastAPI()
+
 # ══ MODELS ════════════════════════════════════════════════════════
 class OrderRequest(BaseModel):
     customer_name:    str = Field(..., min_length=2, max_length=100)
     product_id:       int = Field(..., gt=0)
     quantity:         int = Field(..., gt=0, le=100)
     delivery_address: str = Field(..., min_length=10)
+
 class NewProduct(BaseModel):
     name:     str  = Field(..., min_length=2, max_length=100)
     price:    int  = Field(..., gt=0)
     category: str  = Field(..., min_length=2)
     in_stock: bool = True
+
 class CheckoutRequest(BaseModel):
     customer_name:    str = Field(..., min_length=2)
     delivery_address: str = Field(..., min_length=10)
+
 # ══ DATA ══════════════════════════════════════════════════════════
 products = [
     {'id': 1, 'name': 'Wireless Mouse', 'price': 499, 'category': 'Electronics', 'in_stock': True},
@@ -25,14 +30,17 @@ products = [
 orders        = []
 order_counter = 1
 cart          = []
+
 # ══ HELPERS ═══════════════════════════════════════════════════════
 def find_product(product_id: int):
     for p in products:
         if p['id'] == product_id:
             return p
     return None
+
 def calculate_total(product: dict, quantity: int) -> int:
     return product['price'] * quantity
+
 def filter_products_logic(category=None, min_price=None,
                           max_price=None, in_stock=None):
     result = products
@@ -45,14 +53,9 @@ def filter_products_logic(category=None, min_price=None,
     if in_stock  is not None:
         result = [p for p in result if p['in_stock'] == in_stock]
     return result
+
 # ══ ENDPOINTS ═════════════════════════════════════════════════════
-#
-# ROUTE ORDER — fixed routes BEFORE variable /{product_id}
-# Day 6 new routes: /products/search  /products/sort  /products/page
-# All placed ABOVE /products/{product_id}
-#
-# ══════════════════════════════════════════════════════════════════
-# ── Day 1 ─────────────────────────────────────────────────────────
+
 @app.get('/')
 def home():
     return {'message': 'Welcome to our E-commerce API'}
@@ -61,7 +64,7 @@ def home():
 def get_all_products():
     return {'products': products, 'total': len(products)}
 
-# ── Day 2 ─────────────────────────────────────────────────────────
+# ── Day 2: Filter ────────────────────────────────────────────────
 @app.get('/products/filter')
 def filter_products(
     category:  str  = Query(None),
@@ -72,7 +75,7 @@ def filter_products(
     result = filter_products_logic(category, min_price, max_price, in_stock)
     return {'filtered_products': result, 'count': len(result)}
 
-# ── Day 3 ─────────────────────────────────────────────────────────
+# ── Day 3: Compare ───────────────────────────────────────────────
 @app.get('/products/compare')
 def compare_products(
     product_id_1: int = Query(...),
@@ -92,24 +95,14 @@ def compare_products(
         'price_diff':   abs(p1['price'] - p2['price']),
     }
 
-# ── Day 6 — Step 21: Search by keyword ───────────────────────────
+# ── Day 6: Search, Sort, Pagination (Q1-Q3) ──────────────────────
 @app.get('/products/search')
-def search_products(
-    keyword: str = Query(..., description='Word to search for'),
-):
-    results = [
-        p for p in products
-        if keyword.lower() in p['name'].lower()
-    ]
+def search_products(keyword: str = Query(..., description='Word to search for')):
+    results = [p for p in products if keyword.lower() in p['name'].lower()]
     if not results:
         return {'message': f'No products found for: {keyword}', 'results': []}
-    return {
-        'keyword':     keyword,
-        'total_found': len(results),
-        'results':     results,
-    }
+    return {'keyword': keyword, 'total_found': len(results), 'results': results}
 
-# ── Day 6 — Step 22: Sort by price or name ───────────────────────
 @app.get('/products/sort')
 def sort_products(
     sort_by: str = Query('price', description='price or name'),
@@ -119,33 +112,89 @@ def sort_products(
         return {'error': "sort_by must be 'price' or 'name'"}
     if order not in ['asc', 'desc']:
         return {'error': "order must be 'asc' or 'desc'"}
-    reverse         = (order == 'desc')
+    reverse = (order == 'desc')
     sorted_products = sorted(products, key=lambda p: p[sort_by], reverse=reverse)
-    return {
-        'sort_by':  sort_by,
-        'order':    order,
-        'products': sorted_products,
-    }
+    return {'sort_by': sort_by, 'order': order, 'products': sorted_products}
 
-# ── Day 6 — Step 23: Pagination ───────────────────────────────────
 @app.get('/products/page')
 def get_products_paged(
-    page:  int = Query(1, ge=1,  description='Page number'),
-    limit: int = Query(2, ge=1, le=20, description='Items per page'),
+    page:  int = Query(1, ge=1),
+    limit: int = Query(2, ge=1, le=20),
 ):
     start = (page - 1) * limit
-    end   = start + limit
-    paged = products[start:end]
+    paged = products[start : start + limit]
     return {
-        'page':        page,
-        'limit':       limit,
-        'total':       len(products),
-        'total_pages': -(-len(products) // limit),   # ceiling division
-        'products':    paged,
+        'page': page,
+        'limit': limit,
+        'total': len(products),
+        'total_pages': -(-len(products) // limit),
+        'products': paged,
     }
 
-# ── Day 4 — CRUD ──────────────────────────────────────────────────
-# Variable route /{product_id} — always AFTER all fixed routes
+# ── Day 6: Assignment 5 New Code (Q4, Q5, Q6, Bonus) ─────────────
+
+@app.get('/orders/search')
+def search_orders(customer_name: str = Query(..., description="Customer to search for")):
+    # Q4: Filter orders by customer name (case-insensitive)
+    results = [o for o in orders if customer_name.lower() in o['customer_name'].lower()]
+    if not results:
+        return {'message': f'No orders found for: {customer_name}'}
+    return {'customer_name': customer_name, 'total_found': len(results), 'orders': results}
+
+@app.get('/products/sort-by-category')
+def sort_by_category():
+    # Q5: Sort by category A-Z, then price Low-High
+    result = sorted(products, key=lambda p: (p['category'], p['price']))
+    return {'products': result, 'total': len(result)}
+
+@app.get('/products/browse')
+def browse_products(
+    keyword: str = Query(None),
+    sort_by: str = Query('price'),
+    order:   str = Query('asc'),
+    page:    int = Query(1, ge=1),
+    limit:   int = Query(4, ge=1, le=20),
+):
+    # Q6: Combined Search + Sort + Paginate
+    result = products
+    if keyword:
+        result = [p for p in result if keyword.lower() in p['name'].lower()]
+    
+    if sort_by in ['price', 'name']:
+        result = sorted(result, key=lambda p: p[sort_by], reverse=(order == 'desc'))
+
+    total_found = len(result)
+    start = (page - 1) * limit
+    paged_data = result[start : start + limit]
+
+    return {
+        'keyword': keyword,
+        'sort_by': sort_by,
+        'order': order,
+        'page': page,
+        'limit': limit,
+        'total_found': total_found,
+        'total_pages': -(-total_found // limit),
+        'products': paged_data,
+    }
+
+@app.get('/orders/page')
+def get_orders_paged(
+    page:  int = Query(1, ge=1),
+    limit: int = Query(3, ge=1, le=20),
+):
+    # Bonus: Paginate the orders list
+    start = (page - 1) * limit
+    return {
+        'page': page,
+        'limit': limit,
+        'total': len(orders),
+        'total_pages': -(-len(orders) // limit),
+        'orders': orders[start : start + limit],
+    }
+
+# ── Day 4: CRUD (Variables) ───────────────────────────────────────
+
 @app.post('/products')
 def add_product(new_product: NewProduct, response: Response):
     existing_names = [p['name'].lower() for p in products]
@@ -197,7 +246,7 @@ def get_product(product_id: int):
         return {'error': 'Product not found'}
     return {'product': product}
 
-# ── Day 2 — Orders ────────────────────────────────────────────────
+# ── Day 2: Orders ────────────────────────────────────────────────
 @app.post('/orders')
 def place_order(order_data: OrderRequest):
     global order_counter
@@ -224,13 +273,9 @@ def place_order(order_data: OrderRequest):
 def get_all_orders():
     return {'orders': orders, 'total_orders': len(orders)}
 
-# ── Day 5 — Cart ──────────────────────────────────────────────────
-# fixed routes /cart/add and /cart/checkout BEFORE variable /cart/{product_id}
+# ── Day 5: Cart ──────────────────────────────────────────────────
 @app.post('/cart/add')
-def add_to_cart(
-    product_id: int = Query(...),
-    quantity:   int = Query(1),
-):
+def add_to_cart(product_id: int = Query(...), quantity: int = Query(1)):
     product = find_product(product_id)
     if not product:
         return {'error': 'Product not found'}
@@ -256,8 +301,8 @@ def view_cart():
     if not cart:
         return {'message': 'Cart is empty', 'items': [], 'grand_total': 0}
     return {
-        'items':       cart,
-        'item_count':  len(cart),
+        'items': cart,
+        'item_count': len(cart),
         'grand_total': sum(i['subtotal'] for i in cart),
     }
 
@@ -281,7 +326,7 @@ def checkout(checkout_data: CheckoutRequest, response: Response):
         }
         orders.append(order)
         placed_orders.append(order)
-        grand_total   += item['subtotal']
+        grand_total += item['subtotal']
         order_counter += 1
     cart.clear()
     response.status_code = status.HTTP_201_CREATED
